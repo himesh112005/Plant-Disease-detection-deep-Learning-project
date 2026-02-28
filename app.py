@@ -1,13 +1,22 @@
 import os
 import io
 import json
+import gc
 from flask import Flask, request, jsonify, render_template
 
 try:
     import numpy as np
     from PIL import Image
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+    os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+    import tensorflow as tf
     from tensorflow.keras.models import load_model
     from tensorflow.keras.preprocessing.image import img_to_array
+    
+    # Dramatically reduce memory usage by limiting threads
+    tf.config.threading.set_inter_op_parallelism_threads(1)
+    tf.config.threading.set_intra_op_parallelism_threads(1)
+    
     MODEL_AVAILABLE = True
 except Exception as e:
     print(f"Error importing ML libraries: {e}")
@@ -15,18 +24,22 @@ except Exception as e:
 
 app = Flask(__name__)
 
-# Try to load model
+# Lazy load the model only when a request is made, not on boot
 model = None
-if MODEL_AVAILABLE:
-    try:
-        model_path = os.path.join(os.path.dirname(__file__), 'trained_plant_disease_model.keras')
-        if os.path.exists(model_path):
-            model = load_model(model_path)
-            print("Model loaded successfully")
-        else:
-            print(f"Model file not found at {model_path}")
-    except Exception as e:
-        print(f"Error loading model: {e}")
+def get_model():
+    global model
+    if model is None and MODEL_AVAILABLE:
+        try:
+            model_path = os.path.join(os.path.dirname(__file__), 'trained_plant_disease_model.keras')
+            if os.path.exists(model_path):
+                print("Loading AI model into memory... (doing this lazily to save RAM)")
+                model = load_model(model_path)
+                print("Model loaded successfully")
+            else:
+                print(f"Model file not found at {model_path}")
+        except Exception as e:
+            print(f"Error loading model: {e}")
+    return model
 
 # Class names (38 classes from PlantVillage dataset)
 CLASS_NAMES = [
@@ -110,7 +123,8 @@ def home():
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    if model is None:
+    current_model = get_model()
+    if current_model is None:
         return jsonify({'error': 'Machine learning model not loaded or dependencies missing.'}), 500
 
     if 'image' not in request.files:
@@ -128,13 +142,19 @@ def predict():
              return jsonify({'error': 'Failed to process image. Make sure it is a valid image format.'}), 400
 
         # Predict using keras model
-        predictions = model.predict(processed_img)
+        predictions = current_model.predict(processed_img)
         predicted_class_idx = np.argmax(predictions, axis=1)[0]
         confidence = float(np.max(predictions)) * 100
         
         predicted_class_name = CLASS_NAMES[predicted_class_idx]
         formatted_name = predicted_class_name.replace('___', ' - ').replace('_', ' ')
         remedy = REMEDIES.get(predicted_class_name, "Consult a local agricultural extension office for more specialized care details.")
+        
+        # Free up RAM immediately after prediction
+        del image_bytes
+        del processed_img
+        del predictions
+        gc.collect()
 
         return jsonify({
             'disease': formatted_name,
@@ -143,6 +163,8 @@ def predict():
         })
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
