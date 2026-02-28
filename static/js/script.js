@@ -9,7 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const loader = document.getElementById('loader');
     const errorMessage = document.getElementById('error-message');
     const resultsSection = document.getElementById('results-section');
-    
+
     // Result elements
     const resultImgDisplay = document.getElementById('result-img-display');
     const diseaseName = document.getElementById('disease-name');
@@ -46,15 +46,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // File Input Event
-    fileInput.addEventListener('change', function() {
+    fileInput.addEventListener('change', function () {
         handleFiles(this.files);
     });
 
     function handleFiles(files) {
         if (files.length === 0) return;
-        
+
         const file = files[0];
-        
+
         // Ensure it's an image
         if (!file.type.match('image.*')) {
             showError("Please upload an image file (JPG, PNG, etc).");
@@ -69,13 +69,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function showPreview(file) {
         const reader = new FileReader();
         reader.readAsDataURL(file);
-        reader.onloadend = function() {
+        reader.onloadend = function () {
             imagePreview.src = reader.result;
             resultImgDisplay.src = reader.result; // Also set result image
-            
+
             uploadContent.classList.add('hidden');
             previewContainer.classList.remove('hidden');
-            
+
             // Enable submit button
             submitBtn.disabled = false;
             submitBtn.classList.remove('disabled');
@@ -92,14 +92,14 @@ document.addEventListener('DOMContentLoaded', () => {
         selectedFile = null;
         fileInput.value = '';
         imagePreview.src = '';
-        
+
         previewContainer.classList.add('hidden');
         uploadContent.classList.remove('hidden');
-        
+
         // Disable submit button
         submitBtn.disabled = true;
         submitBtn.classList.add('disabled');
-        
+
         // Hide results
         resultsSection.classList.add('hidden');
         hideError();
@@ -138,10 +138,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: formData
             });
 
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.error || 'Failed to process the image.');
+            let data;
+            const contentType = response.headers.get("content-type");
+            if (contentType && contentType.includes("application/json")) {
+                data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to process the image.');
+                }
+            } else {
+                const textDetail = await response.text();
+                throw new Error(`Server error (${response.status}): The server ran out of memory or timed out. Please try again!`);
             }
 
             displayResults(data);
@@ -159,23 +165,23 @@ document.addEventListener('DOMContentLoaded', () => {
         // Update DOM
         diseaseName.textContent = data.disease;
         remedyText.textContent = data.remedy;
-        
+
         let confidenceVal = parseFloat(data.confidence);
-        
+
         // Show section
         resultsSection.classList.remove('hidden');
-        
+
         // Scroll to results
         resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
         // Animate confidence bar
         setTimeout(() => {
             confidenceBar.style.width = `${confidenceVal}%`;
-            
+
             // Number increment animation
             let start = 0;
             const duration = 1500; // ms
-            const stepTime = 20; 
+            const stepTime = 20;
             const steps = duration / stepTime;
             const increment = confidenceVal / steps;
 
@@ -187,9 +193,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 confidenceScore.textContent = `${start.toFixed(2)}%`;
             }, stepTime);
-            
+
             // Adjust bar color based on confidence
-            if(confidenceVal < 60) {
+            if (confidenceVal < 60) {
                 confidenceBar.style.background = 'linear-gradient(90deg, #f39c12, #e74c3c)';
             } else if (confidenceVal < 85) {
                 confidenceBar.style.background = 'linear-gradient(90deg, #f1c40f, #2ecc71)';
